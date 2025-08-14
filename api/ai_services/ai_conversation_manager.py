@@ -16,6 +16,7 @@ import httpx
 import re
 
 class AIConversationManager:
+    
     # Eliminar lógica de búsqueda, reserva y cancelación de turnos. Solo delega a calendar_utils.
     async def _execute_ai_function(self, function_call, telefono, business_context, tenant, db):
         """Delegar funciones de turnos a calendar_utils"""
