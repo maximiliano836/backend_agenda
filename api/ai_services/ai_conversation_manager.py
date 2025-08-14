@@ -16,7 +16,6 @@ import httpx
 import re
 
 class AIConversationManager:
-    
     # Eliminar lógica de búsqueda, reserva y cancelación de turnos. Solo delega a calendar_utils.
     async def _execute_ai_function(self, function_call, telefono, business_context, tenant, db):
         """Delegar funciones de turnos a calendar_utils"""
@@ -470,7 +469,7 @@ class AIConversationManager:
     def _add_help_footer(self, mensaje: str) -> str:
         """Agregar pie de mensaje con opción de ayuda personalizada"""
         footer = "\n\n💬 _¿Necesitas ayuda personalizada? Escribe 'ayuda persona' para hablar con nuestro equipo._"
-        return mensaje + footer
+        return (mensaje or "") + footer
     
     async def _notify_human_support(self, cliente_id: int, telefono: str, mensaje: str):
         """Notificar a soporte humano"""
@@ -897,31 +896,13 @@ class AIConversationManager:
         # -------------------
         # 0) ATAJOS DETERMINISTAS ANTES DE LA IA
         # -------------------
-        # 0.1) Pedido de VIDEO: responder con link inmediatamente (extraído del contexto del negocio o servicios)
-        def _extraer_primer_url(texto: str | None) -> str | None:
-            if not texto:
-                return None
-            try:
-                import re
-                m = re.search(r"https?://\S+", texto)
-                return m.group(0) if m else None
-            except Exception:
-                return None
-
+        # 0.1) Pedido de VIDEO: responder con link inmediatamente (usando URL canónica del tenant)
         if any(k in mensaje_stripped for k in ["video", "enlace del video", "link del video", "compartime el video", "mandame el video", "ver video"]):
-            # Buscar URL primero en informacion_local
-            url = _extraer_primer_url(business_context.get("informacion_local") or "")
-            # Si no, buscar en servicios informativos
-            if not url:
-                for s in business_context.get("servicios", []) or []:
-                    url = _extraer_primer_url((s.get("mensaje_personalizado") or ""))
-                    if url:
-                        break
+            url = self._get_canonical_video_url(business_context)
             if url:
                 return self._add_help_footer(f"🎬 Aquí tenés el video: {url}")
-            else:
-                # No se encontró URL concreta: responder claro sin repetir
-                return self._add_help_footer("No encuentro el enlace del video en este momento. ¿Querés que te lo envíe por acá cuando esté disponible?")
+            # No se encontró URL concreta: responder claro sin inventar
+            return self._add_help_footer("No encuentro el enlace del video en este momento. ¿Querés que te lo envíe por acá cuando esté disponible?")
 
         # 0.2) "Mostrame/mandame de vuelta/otra vez los horarios" -> repetir lista de horarios (evitar info del negocio)
         if ("horarios" in mensaje_stripped) and any(p in mensaje_stripped for p in ["de vuelta", "devuelta", "otra vez", "de nuevo", "mostrar otra vez", "mostrame otra vez", "mostrame de nuevo", "ver otra vez", "ver de nuevo"]):
@@ -1600,17 +1581,32 @@ Si te preguntan algo no relacionado, responde:
             return self._generar_respuesta_fallback(mensaje, user_history, business_context)
 
     def _get_canonical_video_url(self, business_context: dict) -> str | None:
-        """Obtiene la URL del video desde informacion_local o servicios (primer URL encontrado)."""
+        """Resuelve la URL de video canónica a partir del tenant.
+
+        Prioridad:
+        1) Si en informacion_local hay una instrucción explícita del tipo
+           "UTILIZA ESTE LINK: <url>", usar ese URL.
+        2) Primer URL en informacion_local.
+        3) Primer URL en los mensajes personalizados de servicios informativos.
+        """
         import re
+
         def first_url(text: str | None) -> str | None:
             if not text:
                 return None
             m = re.search(r"https?://\S+", text)
             return m.group(0) if m else None
 
-        url = first_url(business_context.get("informacion_local") or "")
+        info_local = business_context.get("informacion_local") or ""
+        # 1) Intentar patrón explícito
+        m = re.search(r"UTILIZA\s+ESTE\s+LINK:\s*(https?://\S+)", info_local, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+        # 2) Primer URL en informacion_local
+        url = first_url(info_local)
         if url:
             return url
+        # 3) Primer URL en servicios
         for s in business_context.get("servicios", []) or []:
             url = first_url((s.get("mensaje_personalizado") or ""))
             if url:
