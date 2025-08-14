@@ -1606,6 +1606,7 @@ Si te preguntan algo no relacionado, responde:
                 return None
             m = re.search(r"https?://\S+", text)
             return m.group(0) if m else None
+        
 
         url = first_url(business_context.get("informacion_local") or "")
         if url:
